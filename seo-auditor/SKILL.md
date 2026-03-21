@@ -1,6 +1,7 @@
 ---
 name: seo-auditor
 description: "Run SEO audits, keyword research, content gap analysis, and competitor mapping for any website or niche. Use when: analyzing a site's SEO health, planning content strategy, researching keywords, auditing technical SEO, comparing against competitors, or planning Google Ads keywords. NOT for: running actual Google Ads campaigns, making live site changes, or detailed analytics reporting."
+tools: ["web_search", "web_fetch"]
 metadata: { "openclaw": { "emoji": "🔍", "requires": { "tools": ["web_search", "web_fetch"] } } }
 ---
 
@@ -39,6 +40,14 @@ Comprehensive SEO analysis using `web_search` and `web_fetch` — keyword resear
 | **Content Gap** | Topics competitors rank for that you don't (minimum 5 gaps) | Competitive catch-up | ~8-12 queries |
 | **Competitor Map** | Analyze competitor SEO strategy (5 competitors) | Strategic positioning | ~8-12 queries |
 | **Full Report** | All of the above in one deliverable | Comprehensive planning | ~35-45 queries |
+
+## Workflow
+
+Choose the mode that matches your goal, then follow the numbered steps within that mode. For comprehensive analysis, run Mode 5 (Full Report) which executes all modes in sequence.
+
+- **Have an existing site?** → Start with Mode 1 (Site Audit)
+- **Planning new content?** → Start with Mode 2 (Keyword Research)
+- **Want the full picture?** → Run Mode 5 (Full Report)
 
 ## Mode 1: Site Audit
 
@@ -83,6 +92,11 @@ Heading structure:
 ### Step 3 — Technical SEO Checks
 
 ```text
+HTTPS/Security:
+- URL begins with https://? (check the target URL itself)
+- HTTP → HTTPS redirect functional? (inferred if http:// fetch redirects)
+- Scoring: +5 HTTPS present, +3 redirect in place
+
 URL structure:
 - Clean, descriptive slugs: ✅ /pricing  ❌ /page?id=123&ref=abc
 - Canonical tag present and correct?
@@ -108,6 +122,11 @@ Content scoring:
 - Readability: short paragraphs, scannable headers
 - Freshness: dates, update indicators
 - Scoring: +3 adequate length, +3 natural keywords, +2 readable structure, +2 freshness
+
+Internal linking:
+- Count anchor tags pointing to same domain (href="/" or href="https://[domain]/...")
+- <3 internal links on a key page = thin internal linking flag
+- Scoring: +3 adequate internal links (3+), +2 descriptive anchor text
 ```
 
 ### Output Format
@@ -137,7 +156,7 @@ Content scoring:
 1. [what's working well]
 ```
 
-**Minimum output:** At least 3 findings across categories. If fewer found, note "minimal issues detected" with verification recommendation.
+**Minimum output:** At least 2 specific findings (pass or fail) per scored category — minimum 6 findings total. If a category has fewer than 2 checkable elements (unusual), note the limitation explicitly.
 
 ## Mode 2: Keyword Research
 
@@ -163,7 +182,7 @@ web_search("[niche] reviews")
 web_search("site:competitor1.com [niche]")
 web_search("site:competitor2.com [niche]")
 # Extract title tags and H1s from top pages
-web_fetch("competitor1.com/services")
+web_fetch("https://[competitor-domain]/services")
 ```
 
 ### Step 3 — Intent Classification
@@ -217,7 +236,7 @@ small-site opportunities exist, not exact ranking probability.
 > Validate with Google Keyword Planner before committing ad budget.
 ```
 
-**Minimum output:** 10 keywords. At least 3 Commercial/Transactional. All with intent classification.
+**Minimum output:** 10 keywords. At least 3 Commercial/Transactional. All with intent classification. If fewer than 10 unique relevant keywords found across all queries, include a data-limitation note: *"Data limitation: only N relevant keywords found. Broaden seed keywords or niche definition for better coverage."* Do NOT pad with irrelevant terms.
 
 ## Mode 3: Content Gap Analysis
 
@@ -251,9 +270,9 @@ web_search("site:[competitor-domain]")
 ## Content Gap Report: [your site] vs [competitors]
 
 ### Gaps (they rank, you don't) — minimum 5
-| Topic | Competitor | Their URL | Recommended Content Type | Priority |
-|-------|-----------|-----------|------------------------|----------|
-| [topic] | [who] | [url] | Blog / Landing / FAQ / Case Study | High/Med/Low |
+| Topic | Competitor(s) | Their URL | Recommended Content Type | Priority |
+|-------|--------------|-----------|------------------------|----------|
+| [topic] | [who — list all if multiple] | [url] | Blog / Landing / FAQ / Case Study | High/Med/Low |
 
 ### Advantages (you rank, they don't)
 | Topic | Your URL | Protect? |
@@ -325,9 +344,9 @@ Analyze per competitor:
 #### Where they're vulnerable
 - [weakness 1]
 
-#### Keywords to target
-| Keyword | Their Positioning | Our Opportunity |
-|---------|------------------|-----------------|
+#### Keyword Opportunities
+| Keyword | Evidence (where we saw it) | Our Opportunity |
+|---------|--------------------------|-----------------|
 
 > Competitor data sourced from public HTML and search results.
 > For traffic/backlink data, use Ahrefs or SEMrush.
@@ -360,25 +379,26 @@ Generated: [date]
 > Scores are not comparable to SEO platform ratings. Validate key findings
 > against Google Search Console before making budget decisions.
 
-## 1. Site Health Audit
+## 1. Site Audit
 [Mode 1 output]
 
-## 2. Keyword Opportunities
-[Mode 2 output — minimum 10 keywords]
+## 2. Keyword Research
+[All keywords found — minimum 10]
 
-## 3. Content Gaps
-[Mode 3 output — minimum 5 gaps]
+## 3. Content Gap Analysis
+[All gaps found — minimum 5]
 
-## 4. Competitive Landscape
+## 4. Competitor Map
 [Mode 4 output — 5 competitors]
 
 ## 5. Prioritized Action Plan (deduplicated)
 | # | Action | Source Modes | Effort | Impact | Timeline |
 |---|--------|-------------|--------|--------|----------|
-| 1 | [Quick win] | Audit, Keywords | Low | High | This week |
+| 1 | [Quick win] | Site Audit + Keywords | Low | High | This week |
 | 2 | [Medium effort] | Content Gap | Med | High | This month |
-| 3 | [Strategic play] | Competitor | High | High | This quarter |
+| 3 | [Strategic play] | Competitor Map | High | High | This quarter |
 
+Items that appear in multiple modes: list once, cite all source modes in the Source Modes column.
 Items marked with ⚠️ affect ad spend decisions — validate with paid tools first.
 ```
 
@@ -444,6 +464,7 @@ add a prominent warning at the top of the report:
 - **Content quality > quantity**: One thorough 2000-word guide outranks ten 300-word thin posts.
 - **Query budget**: A full report uses ~35-45 Brave Search API queries. Free tier (2,000/month) supports ~50 full audits. Single-mode runs use ~5-15 queries.
 - **Score interpretation**: All scores are heuristic. A 9/10 means "all checked elements present and well-formed" — not "this page ranks well." Ranking depends on factors we can't measure (domain authority, backlinks, user signals).
+- **Non-English sites**: If `web_fetch` returns content in a non-English language, note this explicitly: *"Site content is in [language]. Keyword research and content quality analysis require language-specific context — results may be less accurate. Consider native-language seed keywords."*
 
 ## Upgrade Paths
 
@@ -474,7 +495,7 @@ To verify this skill produces useful results, test against a known site:
 
 ```bash
 # Smoke test: Run site audit on example.com
-# Expected: Score ≤3/10 (minimal content, no SEO optimization)
+# Expected: Score ≤5/10 (has basic HTML elements but no commercial content or optimization)
 # Time: Should complete in <5 minutes
 
 # Real test: Run full report on your actual site
