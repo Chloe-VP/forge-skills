@@ -1,257 +1,399 @@
 ---
 name: x-thread-analyzer
-description: "Extract and analyze X/Twitter posts and threads from URLs. Use when: user shares an X.com or twitter.com link, asks to summarize a tweet, wants to analyze a thread, needs engagement data from a post, or wants to extract insights from X content. NOT for: posting tweets (use xurl skill), searching X without a specific URL, or real-time X monitoring."
-metadata: { "openclaw": { "emoji": "🐦", "requires": { "tools": ["browser"] } } }
+description: Analyze X (Twitter) threads and search results. Given a tweet URL or search query, reconstructs the full thread, identifies key claims, extracts sources/links, analyzes sentiment, and produces a structured intelligence report. For search results, aggregates themes, identifies top voices, and maps consensus vs controversy.
+metadata:
+  {
+    "openclaw":
+      {
+        "emoji": "🔍",
+        "requires": { "bins": ["xurl"] },
+        "models": ["xai/grok-3-mini"],
+        "install":
+          [
+            {
+              "id": "brew",
+              "kind": "brew",
+              "formula": "xdevplatform/tap/xurl",
+              "bins": ["xurl"],
+              "label": "Install xurl (brew)",
+            },
+            {
+              "id": "npm",
+              "kind": "npm",
+              "package": "@xdevplatform/xurl",
+              "bins": ["xurl"],
+              "label": "Install xurl (npm)",
+            },
+          ],
+      },
+  }
 ---
 
 # X Thread Analyzer
 
-Extract full content from X/Twitter posts and threads, then analyze with multiple modes.
+Analyze X (Twitter) threads and search results — reconstructing conversations, identifying claims, extracting signals, and producing structured intelligence reports.
 
-## When to Use
+## Prerequisites
 
-✅ **USE this skill when:**
+- `xurl` CLI installed and authenticated (`xurl auth status`)
+- Access to `xai/grok-3-mini` model for deep interpretation
+- Never use `--verbose` / `-v` with xurl in agent sessions (leaks auth headers)
 
-- User shares an X.com or twitter.com URL
-- "What does this tweet say?"
-- "Summarize this thread"
-- "What's the engagement on this post?"
-- "Extract the key insights from this"
-- "Turn this into an issue/task"
+---
 
-❌ **DON'T use this skill when:**
+## Input Detection
 
-- Posting or replying to tweets (use `xurl` skill)
-- Searching X without a specific URL (use Grok)
-- Real-time X monitoring or feed scanning
-- The URL is not from x.com or twitter.com
+**First, determine the input type:**
 
-## Why Browser-Based
+| Input | Type | Strategy |
+|-------|------|----------|
+| `https://x.com/*/status/*` | Tweet URL / Thread | Thread reconstruction |
+| `https://twitter.com/*/status/*` | Tweet URL / Thread | Thread reconstruction |
+| A tweet ID (numeric) | Single post | Thread reconstruction |
+| Any other string | Search query | Search aggregation |
 
-X blocks `web_fetch` for logged-out content. This skill uses browser snapshots to reliably extract post content, engagement data, and thread context without authentication.
+---
 
-## Extraction Process
+## Mode A: Thread Analysis
 
-### Step 1: Clean the URL
+### Step 1 — Fetch the Root Tweet
 
-Strip tracking parameters before opening:
-
-```text
-Input:  https://x.com/user/status/123456?s=52&t=abc
-Clean:  https://x.com/user/status/123456
-
-Input:  https://twitter.com/user/status/123456
-Clean:  https://x.com/user/status/123456  (normalize domain)
+```bash
+# Accept full URL or bare ID — xurl handles both
+xurl read <TWEET_URL_OR_ID>
 ```
 
-### Step 2: Open and Snapshot
+Extract from JSON response:
+- `data.id` — tweet ID
+- `data.author_id` — author's user ID
+- `data.text` — tweet text
+- `data.conversation_id` — conversation root ID
+- `data.entities.urls[]` — embedded links
+- `data.referenced_tweets[]` — replies, quotes, retweets
 
-```text
-1. Open URL in browser (profile="openclaw")
-2. Take a compact snapshot
-3. Parse the article region
-4. Close the browser tab immediately after extraction
+### Step 2 — Reconstruct the Thread
+
+Fetch all replies in the conversation from the same author:
+
+```bash
+# Search for all posts in this conversation from the original author
+xurl search "conversation_id:<CONVERSATION_ID> from:<AUTHOR_HANDLE>" -n 50
 ```
 
-### Step 3: Extract Fields
+If you don't have the author handle yet, fetch it:
 
-Parse the snapshot for these fields:
-
-```text
-| Field       | Where to find                                    |
-|-------------|--------------------------------------------------|
-| Author      | First link with "Verified account" text           |
-| Handle      | @username link                                    |
-| Post text   | Text nodes inside the article element             |
-| Media       | Image/video links (note: can't extract image text)|
-| Timestamp   | Time element in the article                       |
-| Engagement  | Stats group: replies, reposts, likes, bookmarks   |
-| Views       | Views link with count                             |
+```bash
+xurl user <AUTHOR_ID>
+# Extract data.username from response
 ```
 
-### Step 4: Detect Threads
+Then re-run the conversation search with the handle. Sort results by `created_at` ascending to get chronological thread order.
 
-```text
-Check for thread indicators:
-- Multiple articles by the same author in the conversation region
-- "Show this thread" link
-- Reply chain from the same handle
+### Step 3 — Fetch Replies & Engagement (Optional Context)
 
-If thread detected:
-- Note thread position ("Post 3/7 in thread")
-- Scroll to capture additional posts if needed
-- Summarize the thread arc, not just the linked post
+```bash
+# Get top replies from others (for context on reception)
+xurl search "conversation_id:<CONVERSATION_ID>" -n 30
 ```
 
-## Analysis Modes
+Filter out the original author's posts (already captured). These are third-party reactions.
 
-### Default: Summary
+### Step 4 — Extract Structured Data
 
-Always provide this unless user asks for something specific:
+From all thread posts, extract:
+
+**Claims inventory:**
+- List every declarative assertion made (facts stated, predictions, arguments)
+- Flag hedged claims ("I think", "might") vs. definitive claims
+- Note any statistics or numbers cited
+
+**Sources & links:**
+- Expand all `t.co` URLs using `data.entities.urls[].expanded_url`
+- Categorize: news article, paper, thread, video, product, profile
+
+**Named entities:**
+- People mentioned (`@handles`)
+- Organizations
+- Products / projects
+
+**Engagement signals** (from `data.public_metrics`):
+- like_count, retweet_count, reply_count, quote_count
+- Note which individual tweets got outsized engagement
+
+### Step 5 — Grok Analysis
+
+Pass the extracted thread data to Grok for interpretation:
+
+```
+Model: xai/grok-3-mini
+
+Prompt template:
+---
+You are analyzing an X (Twitter) thread for intelligence signals.
+
+THREAD AUTHOR: @{handle}
+THREAD DATE: {created_at}
+THREAD POSTS ({count} posts):
+
+{numbered_thread_text}
+
+ENGAGEMENT PEAKS:
+{top_engaged_posts}
+
+Analyze and return:
+
+## Thread Summary
+2-3 sentence executive summary of what this thread is about.
+
+## Key Claims
+List each distinct claim with:
+- Claim text (verbatim or paraphrased)
+- Type: [FACT | OPINION | PREDICTION | QUESTION]
+- Evidence: what does the author cite (if anything)?
+- Verifiability: [VERIFIABLE | OPINION-ONLY | NEEDS-CONTEXT]
+
+## Narrative Arc
+How does the argument/story develop? Opening → development → conclusion.
+
+## Sentiment & Tone
+Overall tone, emotional register, rhetorical style.
+
+## Credibility Signals
+What strengthens or weakens the thread's credibility?
+
+## Key Sources
+List all external links with their apparent purpose.
+
+## Red Flags
+Any logical gaps, misleading framings, or unsupported leaps.
+
+## TL;DR for Sharing
+One sentence that captures the thread's core claim.
+---
+```
+
+### Step 6 — Output: Thread Intelligence Report
 
 ```markdown
-**[Author Name]** (@handle) — [timestamp]
+# Thread Intelligence Report
 
-[Full post text, preserving formatting]
+**Source:** [@{handle}](https://x.com/{handle}) — {date}
+**Thread:** [{first_20_chars}...](https://x.com/{handle}/status/{id})
+**Posts in thread:** {count}
+**Total engagement:** {likes} likes · {RTs} RTs · {replies} replies
 
-[If media present: "📷 Attached: [image description]" or "🎥 Attached: video"]
+---
 
-**Engagement**: [views] views • [likes] likes • [reposts] reposts • [bookmarks] bookmarks • [replies] replies
+## Summary
+{grok_summary}
+
+## Key Claims
+{grok_claims}
+
+## Narrative Arc
+{grok_arc}
+
+## Sentiment & Tone
+{grok_sentiment}
+
+## Sources Cited
+| Link | Type | Context |
+|------|------|---------|
+| ... | ... | ... |
+
+## Credibility Assessment
+{grok_credibility}
+
+## Red Flags
+{grok_red_flags}
+
+## TL;DR
+> {grok_tldr}
 ```
 
-Add a brief editorial note: what's interesting, relevant, or worth acting on for the user.
+---
 
-### Mode: Insight Extract
+## Mode B: Search Aggregation
 
-When user wants deeper analysis:
+### Step 1 — Run the Search
+
+```bash
+# Basic search
+xurl search "<QUERY>" -n 25
+
+# With filters (combine as needed)
+xurl search "<QUERY> lang:en" -n 25
+xurl search "<QUERY> -is:retweet" -n 25
+xurl search "from:<handle> <QUERY>" -n 25
+xurl search "<QUERY> min_faves:100" -n 25
+
+# Operator reference (X API v2):
+# lang:en                  English only
+# -is:retweet              Exclude retweets
+# is:verified              Verified accounts only
+# min_faves:N              Minimum likes
+# min_retweets:N           Minimum retweets
+# from:handle              Posts from specific user
+# to:handle                Replies to specific user
+# since:YYYY-MM-DD         After date
+# until:YYYY-MM-DD         Before date
+```
+
+### Step 2 — Fetch Top Voices
+
+From search results, identify the most-engaged authors:
+
+```bash
+# For authors with high-engagement posts, fetch their profiles
+xurl user @{handle}
+# Look at: public_metrics.followers_count, verified status
+```
+
+### Step 3 — Aggregate Themes
+
+Collect all result texts. Group by:
+- Recurring keywords / hashtags
+- Shared links / sources
+- Sentiment polarity (positive / negative / neutral)
+- Author categories (researcher, journalist, enthusiast, critic)
+
+### Step 4 — Grok Analysis
+
+```
+Model: xai/grok-3-mini
+
+Prompt template:
+---
+You are analyzing X (Twitter) search results for intelligence signals.
+
+SEARCH QUERY: "{query}"
+RESULT COUNT: {n} posts
+DATE RANGE: {earliest} to {latest}
+
+POSTS (sorted by engagement):
+{numbered_posts_with_handles_and_metrics}
+
+TOP VOICES:
+{top_authors_with_follower_counts}
+
+Analyze and return:
+
+## Topic Overview
+What is this conversation actually about? What's driving it right now?
+
+## Key Themes
+List 3-7 distinct themes appearing in the results, with representative quotes.
+
+## Top Voices
+Who are the most influential contributors? What position does each take?
+
+## Consensus Points
+What do most posts agree on?
+
+## Controversy & Debate
+Where is there active disagreement? What are the competing positions?
+
+## Sentiment Breakdown
+Approximate split: positive / negative / neutral / mixed.
+What's driving the dominant sentiment?
+
+## Information Quality
+Are sources being cited? Any misinformation signals? Echo chamber patterns?
+
+## Emerging Signals
+Any early signals of a trend, shift, or breaking development?
+
+## Intelligence Summary
+3-5 bullet points an analyst would want to know.
+---
+```
+
+### Step 5 — Output: Search Intelligence Report
 
 ```markdown
-## Insights from @[handle]
+# Search Intelligence Report
 
-### Key Claims
-1. [Claim with supporting quote]
-2. [Claim with supporting quote]
+**Query:** `{query}`
+**Retrieved:** {n} posts · {date_range}
+**Top engagement:** {peak_likes} likes on single post
 
-### Actionable Takeaways
-1. [What you could do with this information]
-2. [How this applies to your work]
+---
 
-### Credibility Check
-- **Author**: [Who they are, follower count, domain expertise]
-- **Sources cited**: [Are claims backed by research/data?]
-- **Verification needed**: [Claims that should be independently verified]
+## Topic Overview
+{grok_overview}
+
+## Key Themes
+{grok_themes}
+
+## Top Voices
+| Handle | Followers | Position |
+|--------|-----------|---------|
+| ... | ... | ... |
+
+## Consensus
+{grok_consensus}
+
+## Controversy
+{grok_controversy}
+
+## Sentiment
+{grok_sentiment}
+
+## Information Quality
+{grok_quality}
+
+## Emerging Signals
+{grok_signals}
+
+## Intelligence Summary
+{grok_bullets}
 ```
 
-### Mode: Issue Creator
+---
 
-Turn a post into a GitHub issue:
+## Error Handling
 
-```markdown
-## Suggested Issue
+| Situation | Resolution |
+|-----------|-----------|
+| `xurl auth status` fails | Direct user to run `xurl auth oauth2` manually |
+| Tweet not found (404) | Post may be deleted or private; report as unavailable |
+| Rate limited (429) | Wait 15 min for search, 1 min for reads; retry |
+| Thread has 1 post | Author may post in separate tweets; check for replies from same user |
+| Search returns 0 results | Try broader query, remove filters, check spelling |
+| Grok unavailable | Produce raw data report without analysis layer; note limitation |
 
-**Title**: [Descriptive title based on post content]
-**Labels**: [Suggested labels]
+**Never** use `--verbose` or any credential flags in agent commands.
 
-### Context
-[Source post summary with link]
+---
 
-### Action Items
-1. [First actionable step derived from the post]
-2. [Second step]
+## Security Notes
 
-### Source
-- Post: [URL]
-- Author: [name] (@handle)
-- Date: [timestamp]
+- Never read, display, or pass `~/.xurl` contents to any model
+- Never print raw `Authorization` headers
+- API keys and tokens must be configured by the user manually outside agent sessions
+- xurl handles auth automatically once configured
+
+---
+
+## Quick-Reference: Common xurl Commands for This Skill
+
+```bash
+# Check auth
+xurl auth status
+
+# Read a tweet (URL or ID)
+xurl read https://x.com/user/status/1234567890
+
+# Get user info (need handle for conversation search)
+xurl user @handle
+xurl user <user_id>
+
+# Search conversation thread
+xurl search "conversation_id:1234567890 from:authorhandle" -n 50
+
+# Search all replies to a conversation
+xurl search "conversation_id:1234567890" -n 30
+
+# General search with filters
+xurl search "AI agents lang:en -is:retweet min_faves:10" -n 25
 ```
-
-### Mode: Engagement Analysis
-
-When user wants to understand performance:
-
-```markdown
-## Engagement Analysis: @[handle]
-
-### Raw Numbers
-| Metric | Count |
-|--------|-------|
-| Views | [N] |
-| Likes | [N] |
-| Reposts | [N] |
-| Bookmarks | [N] |
-| Replies | [N] |
-
-### Ratios (benchmarks for context)
-| Ratio | Value | Benchmark | Assessment |
-|-------|-------|-----------|------------|
-| Likes/Views | X% | 1-3% typical | Above/Below average |
-| Bookmarks/Likes | X:1 | <0.5:1 typical | High = practical value |
-| Reposts/Likes | X:1 | 0.1-0.3:1 typical | High = share-worthy |
-| Replies/Likes | X:1 | 0.1-0.2:1 typical | High = controversial |
-
-### Assessment
-[What the engagement pattern tells us about the content]
-- High bookmarks → practical, save-worthy content
-- High reposts → strong signal/share-worthy takes
-- High replies → controversial or discussion-starting
-- High views, low engagement → reached audience but didn't resonate
-```
-
-### Mode: Response Drafter
-
-Generate a reply or quote tweet:
-
-```markdown
-## Draft Response
-
-### Quote Tweet Option
-"[Draft that adds value — extends the point, adds a personal angle, or
-applies the insight to a specific domain. Never just agrees.]"
-
-### Reply Option
-"[Shorter, conversational reply that contributes to the discussion]"
-
-### Tone Notes
-- [Adjust for user's brand voice]
-- [Don't be sycophantic — add genuine value]
-```
-
-## Handling Edge Cases
-
-### Post Not Loading
-
-```text
-If snapshot shows login wall or "Something went wrong":
-1. Wait 3 seconds, re-snapshot
-2. If still blocked, fall back to web_search for the post content:
-   web_search("[author handle] [key phrase from URL]")
-3. Report partial data with note about what's missing
-```
-
-### Images with Text
-
-```text
-If post contains an image that likely has important text:
-- Note: "📷 Image attached — may contain text/infographic not extracted"
-- Offer: "Want me to analyze the image separately?"
-- Use the image tool if user confirms
-```
-
-### Long Threads (>5 posts)
-
-```text
-For long threads:
-1. Summarize the overall arc (beginning → middle → end)
-2. Pull out the top 3-5 most insightful posts verbatim
-3. Note total thread length: "Thread: 12 posts total, key points below"
-4. Offer to extract any specific post by number
-```
-
-### Deleted or Private Posts
-
-```text
-If the post doesn't exist or is from a private account:
-- Say so clearly: "This post appears to be deleted/private"
-- Don't fabricate content
-- Suggest checking if the URL is correct
-```
-
-### Quote Tweets
-
-```text
-If the post quotes another tweet:
-- Extract BOTH the outer post and the quoted post
-- Label clearly: "Quote tweet by @X, quoting @Y:"
-- Provide context for both
-```
-
-## Tips
-
-- **Always close the browser tab** after extraction. Browser sessions are expensive tokens.
-- **Strip tracking params** (`?s=52`, `?t=abc`) from URLs before opening.
-- **Bookmark ratio is the best signal.** High bookmarks relative to likes = practical, save-worthy content. Flag these.
-- **Check the author.** A quick note on who they are helps contextualize — "Founder of X, 50K followers" vs "Anonymous account, 200 followers."
-- **Don't over-analyze small posts.** A single tweet with 100 views doesn't need engagement analysis. Match depth to content.
-- **Thread summaries > full threads.** For long threads, a good summary beats pasting 15 posts verbatim.
-- **Editorial notes add value.** After summarizing, a one-line "why this matters" is what makes this skill useful vs just reading the tweet.
-- **Normalize timestamps.** Convert to the user's timezone when known (check session context).
