@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Weekly maintenance launchd template.
+
+  Edit before installing:
+    1. <Label>          → com.<you>.weekly-maintenance
+    2. <ProgramArguments> path → wherever you put the script
+    3. <StartCalendarInterval> Weekday/Hour/Minute  (Sun=0, Mon=1, ..., Sat=6)
+    4. <StandardOutPath>/<StandardErrorPath> → match your LOG_DIR
+    5. <EnvironmentVariables> HOME → your home dir
+
+  Install:
+    cp launchd-template.plist ~/Library/LaunchAgents/com.you.weekly-maintenance.plist
+    # edit it
+    launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.you.weekly-maintenance.plist
+    launchctl print     gui/$UID/com.you.weekly-maintenance
+
+  Sleep-wake (recommended if driver host can sleep):
+    sudo pmset repeat wakeorpoweron W 07:55:00   # 5 min before schedule
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.weekly-maintenance</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/YOU/bin/weekly-maintenance.sh</string>
+    </array>
+
+    <!-- Wednesday 08:00 local -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>3</integer>
+        <key>Hour</key>
+        <integer>8</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/YOU</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/YOU/Library/Logs/weekly-maintenance/launchd.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOU/Library/Logs/weekly-maintenance/launchd.err</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/YOU</string>
+</dict>
+</plist>
